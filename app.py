@@ -11,8 +11,8 @@ import faiss
 import numpy as np
 
 # --- CONFIGURACIÓN DE BASE DE DATOS (GOOGLE SHEETS) ---
-# Pega aquí el enlace exacto que copiaste del botón "Compartir" de Google
-URL_GOOGLE_SHEET = "https://docs.google.com/spreadsheets/d/TU_ENLACE_AQUI/edit?usp=sharing"
+# Aquí está tu enlace exacto de Google Sheets
+URL_GOOGLE_SHEET = "https://docs.google.com/spreadsheets/d/1CEpQSW6bcnNve92DUyuSa38-c9-fXoQLSiQ2zGADKIU/edit?usp=sharing"
 
 @st.cache_data(ttl=60) # Actualiza la lista de contraseñas cada 60 segundos
 def cargar_usuarios():
@@ -149,11 +149,6 @@ else:
                         {"role": "user", "content": prompt}
                     ]
                 )
-                full_response = response.choices[0].message.content
-                st.markdown(full_response)
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-            except Exception as e:
-                st.error(f"Error de conexión con la IA: {e}")
                 full_response = response.choices[0].message.content
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
