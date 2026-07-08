@@ -15,11 +15,19 @@ conn = sqlite3.connect('usuarios.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS apoderados (correo TEXT, contrasena TEXT)''')
 
-# Inyectamos tu usuario de prueba si la base de datos está vacía
-c.execute("SELECT * FROM apoderados")
-if not c.fetchall():
-    c.execute("INSERT INTO apoderados (correo, contrasena) VALUES ('casillas.alvaro@gmail.com', '12345678')")
-    conn.commit()
+# --- INYECCIÓN DE USUARIOS BETA ---
+usuarios_beta = [
+    ('casillas.alvaro@gmail.com', '12345678'),  # Tu cuenta maestra
+    ('apoderado1@colegio.cl', 'sjva2026'),      # Usuario Beta 1
+    ('mama.prueba@gmail.com', 'secreto123')     # Usuario Beta 2
+]
+
+# El sistema revisará la lista y agregará a los que falten
+for correo, clave in usuarios_beta:
+    c.execute("SELECT * FROM apoderados WHERE correo=?", (correo,))
+    if not c.fetchone():
+        c.execute("INSERT INTO apoderados (correo, contrasena) VALUES (?, ?)", (correo, clave))
+conn.commit()
 
 # --- CONFIGURACIÓN DE IA ---
 load_dotenv()
