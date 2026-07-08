@@ -3,31 +3,29 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
-import docx  # El nuevo traductor para Word
+import docx
+import pandas as pd  # <-- LA NUEVA HERRAMIENTA PARA LEER GOOGLE SHEETS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
-import sqlite3
 
-# --- CONFIGURACIÓN DE BASE DE DATOS LOCAL (SQLite) ---
-conn = sqlite3.connect('usuarios.db', check_same_thread=False)
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS apoderados (correo TEXT, contrasena TEXT)''')
+# --- CONFIGURACIÓN DE BASE DE DATOS (GOOGLE SHEETS) ---
+# Pega aquí el enlace exacto que copiaste del botón "Compartir" de Google
+URL_GOOGLE_SHEET = "https://docs.google.com/spreadsheets/d/TU_ENLACE_AQUI/edit?usp=sharing"
 
-# --- INYECCIÓN DE USUARIOS BETA ---
-usuarios_beta = [
-    ('casillas.alvaro@gmail.com', '12345678'),  # Tu cuenta maestra
-    ('apoderado1@colegio.cl', 'sjva2026'),      # Usuario Beta 1
-    ('mama.prueba@gmail.com', 'secreto123')     # Usuario Beta 2
-]
-
-# El sistema revisará la lista y agregará a los que falten
-for correo, clave in usuarios_beta:
-    c.execute("SELECT * FROM apoderados WHERE correo=?", (correo,))
-    if not c.fetchone():
-        c.execute("INSERT INTO apoderados (correo, contrasena) VALUES (?, ?)", (correo, clave))
-conn.commit()
+@st.cache_data(ttl=60) # Actualiza la lista de contraseñas cada 60 segundos
+def cargar_usuarios():
+    # El código transforma mágicamente tu enlace de lectura a un formato de datos puros (CSV)
+    url_base = URL_GOOGLE_SHEET.split('/edit')[0]
+    url_csv = f"{url_base}/export?format=csv"
+    
+    # Descarga la tabla y la convierte en texto plano
+    df = pd.read_csv(url_csv)
+    # Limpiamos espacios en blanco por si se pasaron al tipear en el Excel
+    df['correo'] = df['correo'].astype(str).str.strip()
+    df['contrasena'] = df['contrasena'].astype(str).str.strip()
+    return df
 
 # --- CONFIGURACIÓN DE IA ---
 load_dotenv()
@@ -43,18 +41,22 @@ if not st.session_state.autenticado:
     st.title("🔐 Acceso para Apoderados")
     st.write("Por favor, inicia sesión para ingresar al asistente.")
     
-    correo = st.text_input("Correo electrónico")
-    contrasena = st.text_input("Contraseña", type="password")
+    correo = st.text_input("Correo electrónico").strip()
+    contrasena = st.text_input("Contraseña", type="password").strip()
     
     if st.button("Entrar"):
-        c.execute("SELECT * FROM apoderados WHERE correo=? AND contrasena=?", (correo, contrasena))
-        usuario_encontrado = c.fetchone()
-        
-        if usuario_encontrado:
-            st.session_state.autenticado = True
-            st.rerun()
-        else:
-            st.error("Credenciales incorrectas. El usuario no existe en la base de datos local.")
+        try:
+            usuarios_df = cargar_usuarios()
+            # Buscamos si el correo y la contraseña hacen match exacto en tu Excel
+            match = usuarios_df[(usuarios_df['correo'] == correo) & (usuarios_df['contrasena'] == contrasena)]
+            
+            if not match.empty:
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas. El usuario no existe o la contraseña está mal escrita.")
+        except Exception as e:
+            st.error(f"Error al conectar con Google Sheets. Verifica que el enlace sea público. Detalle: {e}")
 
 else:
     # --- LA FÁBRICA DE VECTORES DIRECTA (MULTI-FORMATO) ---
@@ -62,7 +64,6 @@ else:
         texto_completo = ""
         nombre_archivo = archivo.name.lower()
         
-        # 1. Traductor para PDF
         if nombre_archivo.endswith('.pdf'):
             lector = PdfReader(archivo)
             for pagina in lector.pages:
@@ -70,22 +71,17 @@ else:
                 if texto_extraido:
                     texto_completo += texto_extraido
                     
-        # 2. Traductor para Word (.docx)
         elif nombre_archivo.endswith('.docx'):
             doc = docx.Document(archivo)
             for parrafo in doc.paragraphs:
                 texto_completo += parrafo.text + "\n"
                 
-        # 3. Traductor para Texto (.txt)
         elif nombre_archivo.endswith('.txt'):
-            # Los txt vienen en bytes, hay que decodificarlos a texto normal
             texto_completo = archivo.getvalue().decode("utf-8")
         
-        # Si el documento estaba en blanco
         if not texto_completo.strip():
             return None
         
-        # Cortamos el texto y lo convertimos a matemáticas (vectores)
         separador = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, length_function=len)
         pedazos = separador.split_text(texto_completo)
         
@@ -106,7 +102,6 @@ else:
             st.session_state.autenticado = False
             st.rerun()
             
-        # Ampliamos el uploader para que acepte los tres formatos
         archivo_subido = st.file_uploader("Sube el comunicado", type=["pdf", "docx", "txt"])
         
         if archivo_subido:
@@ -154,6 +149,11 @@ else:
                         {"role": "user", "content": prompt}
                     ]
                 )
+                full_response = response.choices[0].message.content
+                st.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+            except Exception as e:
+                st.error(f"Error de conexión con la IA: {e}")
                 full_response = response.choices[0].message.content
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
